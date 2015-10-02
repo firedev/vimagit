@@ -39,6 +39,7 @@ call s:set('g:magit_commit_fixup_mapping',      "CF")
 call s:set('g:magit_reload_mapping',            "R")
 call s:set('g:magit_ignore_mapping',            "I")
 call s:set('g:magit_close_mapping',             "q")
+call s:set('g:magit_folding_mapping',           "<cr>")
 
 call s:set('g:magit_enabled',               1)
 
@@ -141,6 +142,10 @@ function! magit#top_dir()
 	return top_dir
 endfunction
 
+function! magit#get_abs_path(filename)
+	return '"' . magit#top_dir() . a:filename . '"'
+endfunction
+
 " magit#get_status_list: this function returns the git status output formated
 " into a List of Dict as
 " [ {staged', 'unstaged', 'filename'}, ... ]
@@ -153,9 +158,7 @@ function! magit#get_status_list()
 		let filename = line_match[3]
 		if ( filename =~ " -> " )
 			" git status add quotes " for file names with spaces only for rename mode
-			let filename=magit#top_dir() . substitute(filename, '.* -> \(.*\)$', '\1', '')
-		else
-			let filename='"' . magit#top_dir() . filename . '"'
+			let filename=substitute(filename, '.* -> \(.*\)$', '\1', '')
 		endif
 		call add(file_list, { 'staged': line_match[1], 'unstaged': line_match[2], 'filename': filename })
 	endfor
@@ -206,14 +209,14 @@ function! magit#update_diff_dict()
 			let dev_null = ( status == '?' ) ? " /dev/null " : " "
 
 			let filename = file_status['filename']
-			let diff_cmd="git diff --no-ext-diff " . staged_flag . "--no-color --patch -- " . dev_null . " " .  filename
+			let diff_cmd="git diff --no-ext-diff " . staged_flag . "--no-color --patch -- " . dev_null . " " .  magit#get_abs_path(filename)
 			let diff_list=magit#systemlist(diff_cmd)
 			if ( empty(diff_list) )
 				echoerr "diff command \"" . diff_cmd . "\" returned nothing"
 			endif
 			if (!has_key(diff_dict_mode, filename))
 				let diff_dict_mode[filename] = {}
-				let diff_dict_mode[filename]['visible'] = 1
+				let diff_dict_mode[filename]['visible'] = 0
 			endif
 			let diff_dict_mode[filename]['diff'] = []
 			let diff_dict_mode[filename]['exists'] = 1
@@ -253,13 +256,14 @@ function! magit#get_staged_section(mode)
 	put =''
 
 	for [ filename, file_props ] in items(g:magit#diff_dict[a:mode])
+		put =g:magit_git_status_code[file_props['status']] . ': ' . filename
 		if ( file_props['visible'] == 0 )
+			put =''
 			continue
 		endif
 		if ( file_props['exists'] == 0 )
 			echoerr "Error, " . filename . " should not exists"
 		endif
-		put =g:magit_git_status_code[file_props['status']] . ': ' . filename
 		for diff_line in file_props['diff']
 			silent put =diff_line
 		endfor
@@ -527,6 +531,25 @@ endfunction
 
 " {{{ User functions and commands
 
+" magit#open_close_folding()
+function! magit#open_close_folding(open_close)
+	if ( getline(".") =~ g:magit_file_re )
+		let list = matchlist(getline("."), g:magit_file_re)
+		let filename = list[2]
+		let section=magit#get_section()
+		let section_line = magit#get_section()
+		for [section_name, section_str] in items(g:magit_sections)
+			if ( section_line == section_str )
+				let section = section_name
+			endif
+		endfor
+		let g:magit#diff_dict[section][filename]['visible'] =
+		 \ ( g:magit#diff_dict[section][filename]['visible'] == 0 ) ? 1 : 0
+	endif
+	call magit#update_buffer()
+endfunction
+
+
 " magit#update_buffer: this function:
 " 1. checks that current buffer is the wanted one
 " 2. save window state (cursor position...)
@@ -592,6 +615,7 @@ function! magit#show_magit(orientation)
 	execute "nnoremap <buffer> <silent> " . g:magit_commit_fixup_mapping . " :call magit#commit_command('CF')<cr>"
 	execute "nnoremap <buffer> <silent> " . g:magit_ignore_mapping .       " :call magit#ignore_file()<cr>"
 	execute "nnoremap <buffer> <silent> " . g:magit_close_mapping .        " :close<cr>"
+	execute "nnoremap <buffer> <silent> " . g:magit_folding_mapping .      " :call magit#open_close_folding('open')<cr>"
 	
 	call magit#update_buffer()
 	execute "normal! gg"
